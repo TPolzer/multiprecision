@@ -11,14 +11,6 @@
 #include <sstream>
 #include <boost/cstdint.hpp>
 #include <boost/multiprecision/number.hpp>
-#ifdef BOOST_MSVC
-#  pragma warning(push)
-#  pragma warning(disable:4512 4127)
-#endif
-#include <boost/rational.hpp>
-#ifdef BOOST_MSVC
-#  pragma warning(pop)
-#endif
 
 namespace boost{
 namespace multiprecision{
@@ -27,84 +19,105 @@ namespace backends{
 template <class IntBackend>
 struct rational_adaptor
 {
-   typedef number<IntBackend>                integer_type;
-   typedef boost::rational<integer_type>        rational_type;
+   typedef number<IntBackend>                   integer_type;
 
    typedef typename IntBackend::signed_types    signed_types;
    typedef typename IntBackend::unsigned_types  unsigned_types;
    typedef typename IntBackend::float_types     float_types;
 
+private:
+
+   IntBackend m_n, m_d;
+
+   typedef typename mpl::front<unsigned_types>::type ui_type;
+
+public:
+
    rational_adaptor(){}
-   rational_adaptor(const rational_adaptor& o)
-   {
-      m_value = o.m_value;
-   }
-   rational_adaptor(const IntBackend& o) : m_value(o) {}
+   rational_adaptor(const rational_adaptor& o) : m_n(o.m_n), m_d(o.m_d) {}
+   rational_adaptor(const IntBackend& o) : m_n(o), m_d(static_cast<ui_type>(1u)) {}
 
    template <class U>
    rational_adaptor(const U& u, typename enable_if_c<is_convertible<U, IntBackend>::value>::type* = 0) 
-      : m_value(IntBackend(u)){}
+      : m_n(u), m_d(static_cast<ui_type>(1u)) {}
    template <class U>
    explicit rational_adaptor(const U& u, 
       typename enable_if_c<
          boost::multiprecision::detail::is_explicitly_convertible<U, IntBackend>::value && !is_convertible<U, IntBackend>::value
       >::type* = 0) 
-      : m_value(IntBackend(u)){}
+      : m_n(u), m_d(static_cast<ui_type>(1u)) {}
    template <class U>
    typename enable_if_c<(boost::multiprecision::detail::is_explicitly_convertible<U, IntBackend>::value && !is_arithmetic<U>::value), rational_adaptor&>::type operator = (const U& u) 
    {
-      m_value = IntBackend(u);
+      m_n = u;
+      m_d = static_cast<ui_type>(1u);
    }
 
 #ifndef BOOST_NO_CXX11_RVALUE_REFERENCES
-   rational_adaptor(rational_adaptor&& o) : m_value(o.m_value) {}
-   rational_adaptor(IntBackend&& o) : m_value(o) {}
+   rational_adaptor(rational_adaptor&& o) : m_n(BOOST_MP_MOVE(o.m_n)), m_d(BOOST_MP_MOVE(o.m_d)) {}
+   rational_adaptor(IntBackend&& o) : m_n(o), m_d(static_cast<ui_type>(1u)) {}
    rational_adaptor& operator = (rational_adaptor&& o)
    {
-      m_value = static_cast<rational_type&&>(o.m_value);
+      m_n = BOOST_MP_MOVE(o.m_n);
+      m_d = BOOST_MP_MOVE(o.m_d);
       return *this;
    }
 #endif
    rational_adaptor& operator = (const rational_adaptor& o)
    {
-      m_value = o.m_value;
+      m_n = o.m_n;
+      m_d = o.m_d;
       return *this;
    }
    rational_adaptor& operator = (const IntBackend& o)
    {
-      m_value = o;
+      m_n = o;
+      m_d = static_cast<ui_type>(1u);
       return *this;
    }
    template <class Int>
    typename enable_if<is_integral<Int>, rational_adaptor&>::type operator = (Int i)
    {
-      m_value = i;
+      m_n = i;
+      m_d = static_cast<ui_type>(1u);
       return *this;
    }
    template <class Float>
    typename enable_if<is_floating_point<Float>, rational_adaptor&>::type operator = (Float i)
    {
+      using default_ops::eval_left_shift;
+      using default_ops::eval_right_shift;
+      using default_ops::eval_divide;
+      using default_ops::eval_gcd;
+
       int e;
       Float f = std::frexp(i, &e);
       f = std::ldexp(f, std::numeric_limits<Float>::digits);
       e -= std::numeric_limits<Float>::digits;
-      integer_type num(f);
-      integer_type denom(1u);
+      m_n = f;
+      m_d = static_cast<ui_type>(1u);
       if(e > 0)
       {
-         num <<= e;
+         eval_left_shift(m_n, e);
       }
       else if(e < 0)
       {
-         denom <<= -e;
+         eval_left_shift(m_d, -e);
       }
-      m_value.assign(num, denom);
+      IntBackend t1, t2;
+      eval_gcd(t1, m_n, m_d);
+      if(!eval_eq(t1, static_cast<ui_type>(1u)))
+      {
+         eval_divide(t2, m_n, t1);
+         m_n = t2;
+         eval_divide(t2, m_d, t1);
+         m_d = BOOST_MP_MOVE(t2);
+      }
       return *this;
    }
    rational_adaptor& operator = (const char* s)
    {
       std::string s1;
-      multiprecision::number<IntBackend> v1, v2;
       char c;
       bool have_hex = false;
       const char* p = s; // saved for later
@@ -116,7 +129,7 @@ struct rational_adaptor
          s1.append(1, c);
          ++s;
       }
-      v1.assign(s1);
+      m_n = s1.c_str();
       s1.erase();
       if(c == '/')
       {
@@ -128,46 +141,68 @@ struct rational_adaptor
             s1.append(1, c);
             ++s;
          }
-         v2.assign(s1);
+         m_d = s1.c_str();
       }
       else
-         v2 = 1;
+         m_d = static_cast<ui_type>(1u);
       if(*s)
       {
-         BOOST_THROW_EXCEPTION(std::runtime_error(std::string("Could parse the string \"") + p + std::string("\" as a valid rational number.")));
+         BOOST_THROW_EXCEPTION(std::runtime_error(std::string("Could not parse the string \"") + p + std::string("\" as a valid rational number.")));
       }
-      data().assign(v1, v2);
+
+      using default_ops::eval_divide;
+      using default_ops::eval_gcd;
+      using default_ops::eval_eq;
+
+      IntBackend t1, t2;
+      eval_gcd(t1, m_n, m_d);
+      if(!eval_eq(t1, static_cast<ui_type>(1u)))
+      {
+         eval_divide(t2, m_n, t1);
+         m_n = t2;
+         eval_divide(t2, m_d, t1);
+         m_d = BOOST_MP_MOVE(t2);
+      }
       return *this;
    }
    void swap(rational_adaptor& o)
    {
-      std::swap(m_value, o.m_value);
+      m_n.swap(o.m_n);
+      m_d.swap(o.m_d);
    }
    std::string str(std::streamsize digits, std::ios_base::fmtflags f)const
    {
       //
       // We format the string ourselves so we can match what GMP's mpq type does:
       //
-      std::string result = data().numerator().str(digits, f);
-      if(data().denominator() != 1)
+      std::string result = m_n.str(digits, f);
+      std::string t = m_d.str(digits, f);
+      if(t != "1")
       {
          result.append(1, '/');
-         result.append(data().denominator().str(digits, f));
+         result.append(t);
       }
       return result;
    }
    void negate()
    {
-      m_value = -m_value;
+      m_n.negate();
    }
    int compare(const rational_adaptor& o)const
    {
-      return m_value > o.m_value ? 1 : (m_value < o.m_value ? -1 : 0);
+      using default_ops::eval_multiply;
+      IntBackend t1, t2;
+      eval_multiply(t1, m_n, o.m_d);
+      eval_multiply(t2, m_d, o.m_n);
+      return t1.compare(t2);
    }
    template <class Arithmatic>
    typename enable_if_c<is_arithmetic<Arithmatic>::value && !is_floating_point<Arithmatic>::value, int>::type compare(Arithmatic i)const
    {
-      return m_value > i ? 1 : (m_value < i ? -1 : 0);
+      using default_ops::eval_multiply;
+      IntBackend t1;
+      eval_multiply(t1, m_d, i);
+      return m_n.compare(t1);
    }
    template <class Arithmatic>
    typename enable_if_c<is_floating_point<Arithmatic>::value, int>::type compare(Arithmatic i)const
@@ -176,60 +211,281 @@ struct rational_adaptor
       r = i;
       return this->compare(r);
    }
-   rational_type& data() { return m_value; }
-   const rational_type& data()const { return m_value; }
 
-   template <class Archive>
-   void serialize(Archive& ar, const mpl::true_&)
-   {
-      // Saving
-      integer_type n(m_value.numerator()), d(m_value.denominator());
-      ar & n;
-      ar & d;
-   }
-   template <class Archive>
-   void serialize(Archive& ar, const mpl::false_&)
-   {
-      // Loading
-      integer_type n, d;
-      ar & n;
-      ar & d;
-      m_value.assign(n, d);
-   }
+   IntBackend& n() { return m_n; }
+   IntBackend& d() { return m_d; }
+   const IntBackend& n()const { return m_n; }
+   const IntBackend& d()const { return m_d; }
+
    template <class Archive>
    void serialize(Archive& ar, const unsigned int /*version*/)
    {
-      typedef typename Archive::is_saving tag;
-      serialize(ar, tag());
+      ar & m_n;
+      ar & m_d;
    }
-private:
-   rational_type m_value;
 };
+
+namespace detail{
+
+template <class IntBackend, class T>
+void rational_add_subtract_scalar(rational_adaptor<IntBackend>& result, const T& val, bool is_add)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_add;
+   using default_ops::eval_subtract;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   IntBackend t;
+   eval_multiply(t, result.d(), val);
+   if(is_add)
+      eval_add(result.n(), t);
+   else
+      eval_subtract(result.n(), t);
+   eval_gcd(t, result.n(), result.d());
+   if(!eval_eq(t, static_cast<ui_type>(1u)))
+   {
+      IntBackend t2;
+      eval_divide(t2, result.n(), t);
+      result.n() = t2;
+      eval_divide(t2, result.d(), t);
+      result.d() = BOOST_MP_MOVE(t2);
+   }
+}
+
+template <class IntBackend, class T>
+void rational_add_subtract_scalar(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const T& b, bool is_add)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_add;
+   using default_ops::eval_subtract;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   IntBackend t;
+   eval_multiply(result.n(), a.d(), b);
+   if(is_add)
+      eval_add(result.n(), a.n());
+   else
+   {
+      eval_subtract(result.n(), a.n());
+      result.n().negate();
+   }
+   eval_gcd(t, result.n(), a.d());
+   if(!eval_eq(t, static_cast<ui_type>(1u)))
+   {
+      eval_divide(result.d(), result.n(), t);
+      result.n() = result.d();
+      eval_divide(result.d(), a.d(), t);
+   }
+   else
+   {
+      result.d() = a.d();
+   }
+}
+
+template <class IntBackend>
+void rational_add_subtract(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& b, bool is_add)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_add;
+   using default_ops::eval_subtract;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   IntBackend t1, t2;
+   eval_multiply(t1, a.n(), b.d());
+   eval_multiply(t2, a.d(), b.n());
+   if(is_add)
+      eval_add(result.n(), t1, t2);
+   else
+      eval_subtract(result.n(), t1, t2);
+   eval_multiply(result.d(), a.d(), b.d());
+   eval_gcd(t1, result.n(), result.d());
+   if(!eval_eq(t1, static_cast<ui_type>(1u)))
+   {
+      eval_divide(t2, result.n(), t1);
+      result.n() = t2;
+      eval_divide(t2, result.d(), t1);
+      result.d() = BOOST_MP_MOVE(t2);
+   }
+}
+
+template <class IntBackend>
+void rational_multiply_divide(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& b, bool is_mult)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   IntBackend t1, t2;
+   if(is_mult)
+   {
+      eval_multiply(t1, a.n(), b.n());
+      eval_multiply(t2, a.d(), b.d());
+   }
+   else
+   {
+      if(eval_is_zero(b.n()))
+         BOOST_THROW_EXCEPTION(std::overflow_error("Division by zero"));
+      eval_multiply(t1, a.n(), b.d());
+      eval_multiply(t2, a.d(), b.n());
+   }
+   eval_gcd(result.d(), t1, t2);
+   if(!eval_eq(result.d(), static_cast<ui_type>(1u)))
+   {
+      eval_divide(result.n(), t1, result.d());
+      eval_divide(t1, t2, result.d());
+      result.d() = BOOST_MP_MOVE(t1);
+   }
+   else
+   {
+      result.n() = BOOST_MP_MOVE(t1);
+      result.d() = BOOST_MP_MOVE(t2);
+   }
+}
+
+template <class IntBackend, class T>
+void rational_multiply_scalar(rational_adaptor<IntBackend>& result, const T& o)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   IntBackend t1, t2;
+   eval_multiply(t1, result.n(), o);
+   eval_gcd(t2, t1, result.d());
+   if(!eval_eq(t2, static_cast<ui_type>(1u)))
+   {
+      eval_divide(result.n(), t1, t2);
+      eval_divide(t1, result.d(), t2);
+      result.d() = BOOST_MP_MOVE(t1);
+   }
+   else
+   {
+      result.n() = BOOST_MP_MOVE(t1);
+   }
+}
+template <class IntBackend, class T>
+void rational_divide_scalar(rational_adaptor<IntBackend>& result, const T& o)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+
+   using default_ops::eval_multiply;
+   using default_ops::eval_gcd;
+   using default_ops::eval_divide;
+
+   if(!o)
+      BOOST_THROW_EXCEPTION(std::overflow_error("Division by zero"));
+
+   IntBackend t1, t2;
+   eval_multiply(t1, result.d(), o);
+   eval_gcd(t2, t1, result.n());
+   if(!eval_eq(t2, static_cast<ui_type>(1u)))
+   {
+      eval_divide(result.d(), t1, t2);
+      eval_divide(t1, result.n(), t2);
+      result.n() = BOOST_MP_MOVE(t1);
+   }
+   else
+   {
+      result.d() = BOOST_MP_MOVE(t1);
+   }
+}
+
+} // namespace detail
+
 
 template <class IntBackend>
 inline void eval_add(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& o)
 {
-   result.data() += o.data();
+   rational_adaptor<IntBackend> t;
+   detail::rational_add_subtract(t, result, o, true);
+   result = BOOST_MP_MOVE(t);
 }
 template <class IntBackend>
 inline void eval_subtract(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& o)
 {
-   result.data() -= o.data();
+   rational_adaptor<IntBackend> t;
+   detail::rational_add_subtract(t, result, o, false);
+   result = BOOST_MP_MOVE(t);
 }
+template <class IntBackend>
+inline void eval_add(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& b)
+{
+   detail::rational_add_subtract(result, a, b, true);
+}
+template <class IntBackend>
+inline void eval_subtract(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& b)
+{
+   detail::rational_add_subtract(result, a, b, false);
+}
+
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_add(rational_adaptor<IntBackend>& result, const T& o)
+{
+   detail::rational_add_subtract_scalar(result, o, true);
+}
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_subtract(rational_adaptor<IntBackend>& result, const T& o)
+{
+   detail::rational_add_subtract_scalar(result, o, false);
+}
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_add(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const T& o)
+{
+   detail::rational_add_subtract_scalar(result, a, o, true);
+}
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_subtract(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const T& o)
+{
+   detail::rational_add_subtract_scalar(result, a, o, false);
+}
+
 template <class IntBackend>
 inline void eval_multiply(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& o)
 {
-   result.data() *= o.data();
+   rational_adaptor<IntBackend> t;
+   detail::rational_multiply_divide(t, result, o, true);
+   result = BOOST_MP_MOVE(t);
 }
 template <class IntBackend>
 inline void eval_divide(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& o)
 {
-   using default_ops::eval_is_zero;
-   if(eval_is_zero(o))
-   {
-      BOOST_THROW_EXCEPTION(std::overflow_error("Divide by zero."));
-   }
-   result.data() /= o.data();
+   rational_adaptor<IntBackend> t;
+   detail::rational_multiply_divide(t, result, o, false);
+   result = BOOST_MP_MOVE(t);
+}
+template <class IntBackend>
+inline void eval_multiply(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& o)
+{
+   detail::rational_multiply_divide(result, a, o, true);
+}
+template <class IntBackend>
+inline void eval_divide(rational_adaptor<IntBackend>& result, const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& o)
+{
+   detail::rational_multiply_divide(result, a, o, false);
+}
+
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_multiply(rational_adaptor<IntBackend>& result, const T& o)
+{
+   detail::rational_multiply_scalar(result, o);
+}
+template <class IntBackend, class T>
+inline typename enable_if_c<number_category<T>::value != number_kind_floating_point>::type eval_divide(rational_adaptor<IntBackend>& result, const T& o)
+{
+   detail::rational_divide_scalar(result, o);
 }
 
 template <class R, class IntBackend>
@@ -242,39 +498,44 @@ inline typename enable_if_c<number_category<R>::value == number_kind_floating_po
 }
 
 template <class R, class IntBackend>
-inline typename enable_if_c<(number_category<R>::value != number_kind_integer) && (number_category<R>::value != number_kind_floating_point)>::type eval_convert_to(R* result, const rational_adaptor<IntBackend>& backend)
+inline typename enable_if_c<
+   (number_category<R>::value != number_kind_integer) && (number_category<R>::value != number_kind_floating_point)>::type 
+   eval_convert_to(R* result, const rational_adaptor<IntBackend>& arg)
 {
-   typedef typename component_type<number<rational_adaptor<IntBackend> > >::type comp_t;
-   comp_t num(backend.data().numerator());
-   comp_t denom(backend.data().denominator());
-   *result = num.template convert_to<R>();
-   *result /= denom.template convert_to<R>();
+   using default_ops::eval_convert_to;
+   R t;
+   eval_convert_to(result, arg.n());
+   eval_convert_to(result, arg.d());
+   *result /= t;
 }
 
 template <class R, class IntBackend>
-inline typename enable_if_c<number_category<R>::value == number_kind_integer>::type eval_convert_to(R* result, const rational_adaptor<IntBackend>& backend)
+inline typename enable_if_c<number_category<R>::value == number_kind_integer>::type 
+   eval_convert_to(R* result, const rational_adaptor<IntBackend>& arg)
 {
-   typedef typename component_type<number<rational_adaptor<IntBackend> > >::type comp_t;
-   comp_t t = backend.data().numerator();
-   t /= backend.data().denominator();
-   *result = t.template convert_to<R>();
+   using default_ops::eval_convert_to;
+   using default_ops::eval_divide;
+   IntBackend t;
+   eval_divide(t, arg.n(), arg.d());
+   eval_convert_to(result, t);
 }
 
 template <class IntBackend>
 inline bool eval_is_zero(const rational_adaptor<IntBackend>& val)
 {
-   return eval_is_zero(val.data().numerator().backend());
+   return eval_is_zero(val.n());
 }
 template <class IntBackend>
 inline int eval_get_sign(const rational_adaptor<IntBackend>& val)
 {
-   return eval_get_sign(val.data().numerator().backend());
+   return eval_get_sign(val.n());
 }
 
 template<class IntBackend, class V>
 inline void assign_components(rational_adaptor<IntBackend>& result, const V& v1, const V& v2)
 {
-   result.data().assign(v1, v2);
+   result.n() = v1;
+   result.d() = v2;
 }
 
 } // namespace backends
@@ -296,12 +557,12 @@ struct component_type<rational_adaptor<T> >
 template <class IntBackend, expression_template_option ET>
 inline number<IntBackend, ET> numerator(const number<rational_adaptor<IntBackend>, ET>& val)
 {
-   return val.backend().data().numerator();
+   return val.backend().n();
 }
 template <class IntBackend, expression_template_option ET>
 inline number<IntBackend, ET> denominator(const number<rational_adaptor<IntBackend>, ET>& val)
 {
-   return val.backend().data().denominator();
+   return val.backend().d();
 }
 
 #ifdef BOOST_NO_SFINAE_EXPR
