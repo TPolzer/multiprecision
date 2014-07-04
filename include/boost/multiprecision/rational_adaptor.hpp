@@ -356,6 +356,11 @@ void rational_multiply_divide(rational_adaptor<IntBackend>& result, const ration
       result.n() = BOOST_MP_MOVE(t1);
       result.d() = BOOST_MP_MOVE(t2);
    }
+   if(eval_get_sign(result.d()) < 0)
+   {
+      result.n().negate();
+      result.d().negate();
+   }
 }
 
 template <class IntBackend, class T>
@@ -409,6 +414,11 @@ void rational_divide_scalar(rational_adaptor<IntBackend>& result, const T& o)
    else
    {
       result.d() = BOOST_MP_MOVE(t1);
+   }
+   if(eval_get_sign(result.d()) < 0)
+   {
+      result.n().negate();
+      result.d().negate();
    }
 }
 
