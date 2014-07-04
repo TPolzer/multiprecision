@@ -8,7 +8,7 @@
 #endif
 
 #include <boost/multiprecision/cpp_int.hpp>
-
+#include <boost/rational.hpp>
 #include "test_arithmetic.hpp"
 
 template <unsigned MinBits, unsigned MaxBits, boost::multiprecision::cpp_integer_type SignType, class Allocator, boost::multiprecision::expression_template_option ExpressionTemplates>

@@ -89,6 +89,7 @@ public:
       using default_ops::eval_right_shift;
       using default_ops::eval_divide;
       using default_ops::eval_gcd;
+      using default_ops::eval_eq;
 
       int e;
       Float f = std::frexp(i, &e);
@@ -237,6 +238,7 @@ void rational_add_subtract_scalar(rational_adaptor<IntBackend>& result, const T&
    using default_ops::eval_subtract;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
+   using default_ops::eval_eq;
 
    IntBackend t;
    eval_multiply(t, result.d(), val);
@@ -265,6 +267,7 @@ void rational_add_subtract_scalar(rational_adaptor<IntBackend>& result, const ra
    using default_ops::eval_subtract;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
+   using default_ops::eval_eq;
 
    IntBackend t;
    eval_multiply(result.n(), a.d(), b);
@@ -298,6 +301,7 @@ void rational_add_subtract(rational_adaptor<IntBackend>& result, const rational_
    using default_ops::eval_subtract;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
+   using default_ops::eval_eq;
 
    IntBackend t1, t2;
    eval_multiply(t1, a.n(), b.d());
@@ -325,6 +329,7 @@ void rational_multiply_divide(rational_adaptor<IntBackend>& result, const ration
    using default_ops::eval_multiply;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
+   using default_ops::eval_eq;
 
    IntBackend t1, t2;
    if(is_mult)
@@ -361,6 +366,7 @@ void rational_multiply_scalar(rational_adaptor<IntBackend>& result, const T& o)
    using default_ops::eval_multiply;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
+   using default_ops::eval_eq;
 
    IntBackend t1, t2;
    eval_multiply(t1, result.n(), o);
@@ -384,12 +390,15 @@ void rational_divide_scalar(rational_adaptor<IntBackend>& result, const T& o)
    using default_ops::eval_multiply;
    using default_ops::eval_gcd;
    using default_ops::eval_divide;
-
-   if(!o)
-      BOOST_THROW_EXCEPTION(std::overflow_error("Division by zero"));
+   using default_ops::eval_eq;
+   using default_ops::eval_is_zero;
 
    IntBackend t1, t2;
    eval_multiply(t1, result.d(), o);
+
+   if(eval_is_zero(t1))
+      BOOST_THROW_EXCEPTION(std::overflow_error("Division by zero"));
+
    eval_gcd(t2, t1, result.n());
    if(!eval_eq(t2, static_cast<ui_type>(1u)))
    {

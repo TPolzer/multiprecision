@@ -37,6 +37,7 @@
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_int.hpp>
 #include <boost/multiprecision/rational_adaptor.hpp>
+#include <boost/rational.hpp>
 #include "test.hpp"
 #include <iostream>
 #include <iomanip>
