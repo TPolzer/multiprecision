@@ -322,8 +322,12 @@ int main()
    t1.test();
 #endif
 #ifdef TEST2
+   tester<checked_cpp_rational> t2;
+   t2.test();
 #endif
 #ifdef TEST3
+   tester<number<rational_adaptor<cpp_int_backend<2048, 2048, signed_magnitude, checked> > > > t3;
+   t3.test();
 #endif
    return boost::report_errors();
 }
