@@ -557,6 +557,23 @@ inline void assign_components(rational_adaptor<IntBackend>& result, const V& v1,
    result.d() = v2;
 }
 
+template<class IntBackend, class T>
+inline typename disable_if_c<is_number_expression<T>::value, bool>::type 
+   eval_eq(const rational_adaptor<IntBackend>& rat, const T& val)
+{
+   typedef typename mpl::front<typename IntBackend::unsigned_types>::type ui_type;
+   using default_ops::eval_eq;
+
+   return eval_eq(rat.d(), static_cast<ui_type>(1u)) && eval_eq(rat.n(), number<IntBackend>::canonical_value(val));
+}
+
+template<class IntBackend>
+inline bool eval_eq(const rational_adaptor<IntBackend>& a, const rational_adaptor<IntBackend>& b)
+{
+   using default_ops::eval_eq;
+   return eval_eq(a.d(), b.d()) && eval_eq(a.n(), b.n());
+}
+
 } // namespace backends
 
 template<class IntBackend>
